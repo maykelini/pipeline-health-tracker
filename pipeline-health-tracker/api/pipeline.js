@@ -7,16 +7,11 @@ module.exports = async function handler(req, res) {
   if (!apiKey) return res.status(500).json({ error: 'ASHBY_API_KEY not configured' });
 
   const credentials = Buffer.from(`${apiKey}:`).toString('base64');
-  const headers = {
-    'Authorization': `Basic ${credentials}`,
-    'Content-Type': 'application/json'
-  };
+  const headers = { 'Authorization': `Basic ${credentials}`, 'Content-Type': 'application/json' };
 
   async function ashbyPost(endpoint, body = {}) {
     const r = await fetch(`https://api.ashbyhq.com/${endpoint}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
+      method: 'POST', headers, body: JSON.stringify(body)
     });
     return r.json();
   }
@@ -25,11 +20,13 @@ module.exports = async function handler(req, res) {
     const now = new Date();
     const cutoff = new Date(now - 30 * 24 * 60 * 60 * 1000);
 
+    // Fetch schedules — up to 20 pages
     let schedules = [];
     let cursor = null;
     let hasMore = true;
+    let pages = 0;
 
-    while (hasMore) {
+    while (hasMore && pages < 20) {
       const body = { limit: 100 };
       if (cursor) body.cursor = cursor;
       const data = await ashbyPost('interviewSchedule.list', body);
@@ -37,8 +34,7 @@ module.exports = async function handler(req, res) {
       schedules = schedules.concat(data.results || []);
       hasMore = data.moreDataAvailable;
       cursor = data.nextCursor;
-      const oldest = data.results?.[data.results.length - 1];
-      if (oldest && new Date(oldest.updatedAt) < cutoff) break;
+      pages++;
     }
 
     const waitingOnFeedback = {};
@@ -58,17 +54,18 @@ module.exports = async function handler(req, res) {
       const appId = schedule.applicationId;
       if (!appId) continue;
 
-      const allSubmitted = pastEvents.every(e => e.hasSubmittedFeedback === true);
       const anyMissing = pastEvents.some(e => e.hasSubmittedFeedback === false);
+      const allSubmitted = pastEvents.every(e => e.hasSubmittedFeedback === true);
 
       if (anyMissing) {
-        waitingOnFeedback[appId] = { scheduleId: schedule.id, updatedAt: schedule.updatedAt };
+        waitingOnFeedback[appId] = true;
         delete needsDecision[appId];
       } else if (allSubmitted && !waitingOnFeedback[appId]) {
-        needsDecision[appId] = { scheduleId: schedule.id, updatedAt: schedule.updatedAt };
+        needsDecision[appId] = true;
       }
     }
 
+    // Fetch active applications
     let applications = [];
     let appCursor = null;
     let appHasMore = true;
@@ -93,21 +90,16 @@ module.exports = async function handler(req, res) {
         m => m.role === 'Recruiter' || m.role === 'HiringManager' || m.role === 'Coordinator'
       );
       const recruiterName = recruiter?.firstName
-        ? `${recruiter.firstName} ${recruiter.lastName || ''}`.trim()
-        : '—';
-      const candidateName = app.candidate?.name || '—';
-      const jobTitle = app.job?.title || '—';
-      const stageName = app.currentInterviewStage?.title || '—';
+        ? `${recruiter.firstName} ${recruiter.lastName || ''}`.trim() : '—';
       const stageEntered = app.currentInterviewStageEnteredAt || app.updatedAt;
       const daysInStage = stageEntered
-        ? Math.floor((Date.now() - new Date(stageEntered)) / 86400000)
-        : null;
+        ? Math.floor((Date.now() - new Date(stageEntered)) / 86400000) : null;
       const candidateId = app.candidate?.id || '';
       return {
         id: appId,
-        candidateName,
-        jobTitle,
-        stage: stageName,
+        candidateName: app.candidate?.name || '—',
+        jobTitle: app.job?.title || '—',
+        stage: app.currentInterviewStage?.title || '—',
         recruiter: recruiterName,
         daysInStage,
         ashbyUrl: candidateId ? `https://app.ashbyhq.com/candidates/${candidateId}` : null
@@ -122,7 +114,6 @@ module.exports = async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error('Pipeline error:', err);
     res.status(500).json({ error: err.message });
   }
 };
