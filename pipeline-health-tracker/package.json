@@ -2,5 +2,5 @@
   "name": "pipeline-health-tracker",
   "version": "1.0.0",
   "description": "Northslope Pipeline Health Tracker",
-  "engines": { "node": "18.x" }
+  "engines": { "node": "20.x" }
 }
