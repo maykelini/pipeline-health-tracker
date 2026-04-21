@@ -1,4 +1,5 @@
-module.exports = async function handler(req, res) {  res.setHeader('Access-Control-Allow-Origin', '*');
+module.exports = async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
@@ -21,107 +22,107 @@ module.exports = async function handler(req, res) {  res.setHeader('Access-Contr
   }
 
   try {
-    // 1. Fetch all active applications (paginated)
-    let applications = [];
+    const now = new Date();
+    const cutoff = new Date(now - 30 * 24 * 60 * 60 * 1000);
+
+    let schedules = [];
     let cursor = null;
     let hasMore = true;
 
     while (hasMore) {
-      const body = { limit: 100, status: 'Active' };
+      const body = { limit: 100 };
       if (cursor) body.cursor = cursor;
-      const data = await ashbyPost('application.list', body);
-      if (!data.success) throw new Error(JSON.stringify(data.errors || data));
-      applications = applications.concat(data.results || []);
+      const data = await ashbyPost('interviewSchedule.list', body);
+      if (!data.success) break;
+      schedules = schedules.concat(data.results || []);
       hasMore = data.moreDataAvailable;
       cursor = data.nextCursor;
+      const oldest = data.results?.[data.results.length - 1];
+      if (oldest && new Date(oldest.updatedAt) < cutoff) break;
     }
 
-    // 2. For each application, fetch interview schedule to determine stage
-    // We'll use the applicationFeedback to check waiting vs needs decision
-    const waitingOnFeedback = [];
-    const needsDecision = [];
+    const waitingOnFeedback = {};
+    const needsDecision = {};
 
-    // Batch: get all interview schedules
-    const schedData = await ashbyPost('interviewSchedule.list', { limit: 100 });
-    const schedules = schedData.success ? (schedData.results || []) : [];
+    for (const schedule of schedules) {
+      const events = schedule.interviewEvents || [];
+      if (events.length === 0) continue;
 
-    // Map applicationId -> schedules
-    const schedByApp = {};
-    for (const s of schedules) {
-      if (!schedByApp[s.applicationId]) schedByApp[s.applicationId] = [];
-      schedByApp[s.applicationId].push(s);
-    }
+      const pastEvents = events.filter(e => {
+        const end = new Date(e.endTime || e.startTime || 0);
+        return end < now && end > cutoff;
+      });
 
-    for (const app of applications) {
-      // Skip if no interview stages
-      const stageType = (app.currentInterviewPlan?.name || app.currentStageDetails?.interviewPlanStage?.type || '').toLowerCase();
-      const stageName = app.currentInterviewPlan?.name || app.applicationStage?.title || app.stage?.title || '';
+      if (pastEvents.length === 0) continue;
 
-      // Check feedback status via the application's feedbackStatus field (if available)
-      // Ashby native: app.feedbackState or similar
-      const feedbackState = app.feedbackState || app.feedbackStatus || '';
+      const appId = schedule.applicationId;
+      if (!appId) continue;
 
-      // Use Ashby's own fields when available
-      if (feedbackState === 'WaitingOnFeedback' || feedbackState === 'waiting_on_feedback') {
-        waitingOnFeedback.push(formatApp(app));
-      } else if (feedbackState === 'NeedsDecision' || feedbackState === 'needs_decision') {
-        needsDecision.push(formatApp(app));
-      } else {
-        // Fallback: check if application has scheduled interviews without feedback
-        const appSchedules = schedByApp[app.id] || [];
-        const hasPastInterview = appSchedules.some(s => {
-          const end = new Date(s.scheduledEnd || s.endTime || 0);
-          return end < new Date();
-        });
+      const allSubmitted = pastEvents.every(e => e.hasSubmittedFeedback === true);
+      const anyMissing = pastEvents.some(e => e.hasSubmittedFeedback === false);
 
-        if (hasPastInterview) {
-          // Get feedback for this application
-          const fbData = await ashbyPost('applicationFeedback.list', { applicationId: app.id });
-          const feedbacks = fbData.success ? (fbData.results || []) : [];
-          const hasSubmittedFeedback = feedbacks.some(f => f.status === 'Submitted' || f.submittedAt);
-
-          if (!hasSubmittedFeedback) {
-            waitingOnFeedback.push(formatApp(app));
-          } else {
-            // Has feedback but still in same stage = Needs Decision
-            needsDecision.push(formatApp(app));
-          }
-        }
+      if (anyMissing) {
+        waitingOnFeedback[appId] = { scheduleId: schedule.id, updatedAt: schedule.updatedAt };
+        delete needsDecision[appId];
+      } else if (allSubmitted && !waitingOnFeedback[appId]) {
+        needsDecision[appId] = { scheduleId: schedule.id, updatedAt: schedule.updatedAt };
       }
     }
 
+    let applications = [];
+    let appCursor = null;
+    let appHasMore = true;
+
+    while (appHasMore) {
+      const body = { limit: 100, status: 'Active' };
+      if (appCursor) body.cursor = appCursor;
+      const data = await ashbyPost('application.list', body);
+      if (!data.success) break;
+      applications = applications.concat(data.results || []);
+      appHasMore = data.moreDataAvailable;
+      appCursor = data.nextCursor;
+    }
+
+    const appMap = {};
+    for (const app of applications) appMap[app.id] = app;
+
+    function formatApp(appId) {
+      const app = appMap[appId];
+      if (!app) return null;
+      const recruiter = (app.hiringTeam || []).find(
+        m => m.role === 'Recruiter' || m.role === 'HiringManager' || m.role === 'Coordinator'
+      );
+      const recruiterName = recruiter?.firstName
+        ? `${recruiter.firstName} ${recruiter.lastName || ''}`.trim()
+        : '—';
+      const candidateName = app.candidate?.name || '—';
+      const jobTitle = app.job?.title || '—';
+      const stageName = app.currentInterviewStage?.title || '—';
+      const stageEntered = app.currentInterviewStageEnteredAt || app.updatedAt;
+      const daysInStage = stageEntered
+        ? Math.floor((Date.now() - new Date(stageEntered)) / 86400000)
+        : null;
+      const candidateId = app.candidate?.id || '';
+      return {
+        id: appId,
+        candidateName,
+        jobTitle,
+        stage: stageName,
+        recruiter: recruiterName,
+        daysInStage,
+        ashbyUrl: candidateId ? `https://app.ashbyhq.com/candidates/${candidateId}` : null
+      };
+    }
+
     res.status(200).json({
-      waitingOnFeedback,
-      needsDecision,
+      waitingOnFeedback: Object.keys(waitingOnFeedback).map(formatApp).filter(Boolean),
+      needsDecision: Object.keys(needsDecision).map(formatApp).filter(Boolean),
       totalActive: applications.length,
       fetchedAt: new Date().toISOString()
     });
 
   } catch (err) {
-    console.error('Pipeline API error:', err);
+    console.error('Pipeline error:', err);
     res.status(500).json({ error: err.message });
   }
-}
-
-function formatApp(app) {
-  const recruiter = app.hiringTeam?.find(m => m.role === 'HiringManager' || m.role === 'Recruiter');
-  const recruiterName = recruiter?.name || app.recruiterName || app.owner?.name || '—';
-  const candidateName = app.candidate?.name || app.candidateName || '—';
-  const jobTitle = app.job?.title || app.jobTitle || '—';
-  const stageName = app.currentInterviewPlan?.name || app.applicationStage?.title || app.stage?.title || '—';
-  const createdAt = app.createdAt || app.appliedAt;
-  const daysInStage = app.currentStageEnteredAt
-    ? Math.floor((Date.now() - new Date(app.currentStageEnteredAt)) / 86400000)
-    : null;
-
-  return {
-    id: app.id,
-    candidateName,
-    jobTitle,
-    stage: stageName,
-    recruiter: recruiterName,
-    daysInStage,
-    createdAt,
-    ashbyUrl: app.id ? `https://app.ashbyhq.com/candidates/${app.candidateId || ''}` : null
-  };
-}
+};
