@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pipeline Health Tracker · Northslope</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2330;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --red: #f85149;
+      --red-bg: rgba(248,81,73,0.08);
+      --red-border: rgba(248,81,73,0.25);
+      --yellow: #e3b341;
+      --yellow-bg: rgba(227,179,65,0.08);
+      --yellow-border: rgba(227,179,65,0.25);
+      --green: #3fb950;
+      --blue: #58a6ff;
+      --font: 'DM Sans', sans-serif;
+      --mono: 'DM Mono', monospace;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ── HEADER ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--text);
+    }
+
+    .logo-mark {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, #2d6af7, #1a4fc4);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .last-updated {
+      font-size: 12px;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      font-family: var(--font);
+      transition: all .15s;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+
+    .btn-primary {
+      background: #2d6af7;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #1a4fc4; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    .btn-slack {
+      background: #4a154b;
+      color: #fff;
+      border: 1px solid #6b2b6d;
+    }
+    .btn-slack:hover { background: #5a1f5b; }
+    .btn-slack:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* ── MAIN ── */
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 28px 24px;
+    }
+
+    /* ── STAT BAR ── */
+    .stats-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      flex: 1;
+      min-width: 140px;
+    }
+
+    .stat-card .val {
+      font-size: 26px;
+      font-weight: 600;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .stat-card .lbl {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .stat-card.red .val { color: var(--red); }
+    .stat-card.yellow .val { color: var(--yellow); }
+    .stat-card.neutral .val { color: var(--blue); }
+
+    /* ── COLUMNS ── */
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 768px) {
+      .columns { grid-template-columns: 1fr; }
+    }
+
+    .column-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .column-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot.red { background: var(--red); }
+    .dot.yellow { background: var(--yellow); }
+
+    .count-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 20px;
+      font-family: var(--mono);
+    }
+
+    .count-badge.red { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+    .count-badge.yellow { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow-border); }
+
+    /* ── CARDS ── */
+    .cards { display: flex; flex-direction: column; gap: 8px; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      transition: border-color .15s, background .15s;
+    }
+
+    .card:hover { border-color: #58a6ff44; background: var(--surface2); }
+    .card.red { border-left: 3px solid var(--red); }
+    .card.yellow { border-left: 3px solid var(--yellow); }
+
+    .card-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .candidate-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+      line-height: 1.3;
+    }
+
+    .days-badge {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-family: var(--mono);
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+
+    .days-badge.urgent { background: rgba(248,81,73,.15); color: var(--red); }
+    .days-badge.warn { background: rgba(227,179,65,.12); color: var(--yellow); }
+    .days-badge.ok { background: rgba(63,185,80,.1); color: var(--green); }
+
+    .card-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .meta-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(255,255,255,.04);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 7px;
+    }
+
+    .card-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--blue);
+      text-decoration: none;
+      opacity: 0;
+      transition: opacity .15s;
+    }
+
+    .card:hover .card-link { opacity: 1; }
+
+    /* ── EMPTY STATE ── */
+    .empty {
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 32px 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .empty-icon { font-size: 24px; margin-bottom: 8px; }
+
+    /* ── LOADING ── */
+    #loader {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 80px 20px;
+      gap: 16px;
+      color: var(--muted);
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 2px solid var(--border);
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── ERROR ── */
+    #error-box {
+      display: none;
+      background: var(--red-bg);
+      border: 1px solid var(--red-border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      color: var(--red);
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+
+    /* ── SLACK MODAL ── */
+    #slack-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.7);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #slack-modal.open { display: flex; }
+
+    .modal-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 480px;
+      max-width: calc(100vw - 32px);
+    }
+
+    .modal-title {
+      font-weight: 600;
+      font-size: 15px;
+      margin-bottom: 6px;
+    }
+
+    .modal-sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 18px;
+    }
+
+    .modal-preview {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text);
+      white-space: pre-wrap;
+      max-height: 240px;
+      overflow-y: auto;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+
+    .modal-label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+
+    .modal-input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      margin-bottom: 16px;
+      outline: none;
+    }
+
+    .modal-input:focus { border-color: var(--blue); }
+
+    .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* ── TOAST ── */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 18px;
+      font-size: 13px;
+      color: var(--text);
+      z-index: 300;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4);
+      animation: slideUp .2s ease;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .toast-icon { font-size: 16px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-mark">N</div>
+    Pipeline Health Tracker
+  </div>
+  <div class="header-right">
+    <span class="last-updated" id="last-updated">—</span>
+    <button class="btn btn-ghost" onclick="loadData()" id="refresh-btn">
+      ↻ Refresh
+    </button>
+    <button class="btn btn-slack" onclick="openSlackModal()" id="slack-btn" disabled>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5.042 15.165a2.528 2.528 0 01-2.52 2.523A2.528 2.528 0 010 15.165a2.527 2.527 0 012.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 012.521-2.52 2.527 2.527 0 012.521 2.52v6.313A2.528 2.528 0 018.834 24a2.528 2.528 0 01-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 01-2.521-2.52A2.528 2.528 0 018.834 0a2.527 2.527 0 012.521 2.522v2.52H8.834zm0 1.271a2.527 2.527 0 012.521 2.521 2.527 2.527 0 01-2.521 2.521H2.522A2.528 2.528 0 010 8.834a2.528 2.528 0 012.522-2.521h6.312zm10.122 2.521a2.528 2.528 0 012.522-2.521A2.528 2.528 0 0124 8.834a2.528 2.528 0 01-2.522 2.521h-2.522V8.834zm-1.268 0a2.528 2.528 0 01-2.523 2.521 2.527 2.527 0 01-2.52-2.521V2.522A2.527 2.527 0 0115.165 0a2.528 2.528 0 012.523 2.522v6.312zm-2.523 10.122a2.528 2.528 0 012.523 2.522A2.528 2.528 0 0115.165 24a2.527 2.527 0 01-2.52-2.522v-2.522h2.52zm0-1.268a2.527 2.527 0 01-2.52-2.523 2.527 2.527 0 012.52-2.52h6.313A2.528 2.528 0 0124 15.165a2.528 2.528 0 01-2.522 2.523h-6.313z"/></svg>
+      Send to Slack
+    </button>
+  </div>
+</header>
+
+<main>
+  <div id="error-box"></div>
+
+  <div id="loader">
+    <div class="spinner"></div>
+    <span>Loading pipeline data from Ashby...</span>
+  </div>
+
+  <div id="content" style="display:none">
+    <!-- Stats -->
+    <div class="stats-row">
+      <div class="stat-card neutral">
+        <div class="val" id="stat-total">—</div>
+        <div class="lbl">Active candidates</div>
+      </div>
+      <div class="stat-card red">
+        <div class="val" id="stat-waiting">—</div>
+        <div class="lbl">Waiting on feedback</div>
+      </div>
+      <div class="stat-card yellow">
+        <div class="val" id="stat-decision">—</div>
+        <div class="lbl">Needs decision</div>
+      </div>
+    </div>
+
+    <!-- Columns -->
+    <div class="columns">
+      <!-- Waiting on Feedback -->
+      <div>
+        <div class="column-header">
+          <div class="column-title">
+            <span class="dot red"></span>
+            Waiting on Feedback
+          </div>
+          <span class="count-badge red" id="badge-waiting">0</span>
+        </div>
+        <div class="cards" id="waiting-cards"></div>
+      </div>
+
+      <!-- Needs Decision -->
+      <div>
+        <div class="column-header">
+          <div class="column-title">
+            <span class="dot yellow"></span>
+            Needs Decision
+          </div>
+          <span class="count-badge yellow" id="badge-decision">0</span>
+        </div>
+        <div class="cards" id="decision-cards"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Slack Modal -->
+<div id="slack-modal">
+  <div class="modal-box">
+    <div class="modal-title">Send to Slack</div>
+    <div class="modal-sub">Preview the message before sending to your channel.</div>
+    <div class="modal-preview" id="slack-preview"></div>
+    <div class="modal-label">Slack Webhook URL</div>
+    <input type="text" class="modal-input" id="webhook-input" placeholder="https://hooks.slack.com/services/..." />
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeSlackModal()">Cancel</button>
+      <button class="btn btn-slack" onclick="sendToSlack()">Send message</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"><span class="toast-icon" id="toast-icon"></span><span id="toast-msg"></span></div>
+
+<script>
+  let pipelineData = null;
+
+  async function loadData() {
+    const loader = document.getElementById('loader');
+    const content = document.getElementById('content');
+    const errorBox = document.getElementById('error-box');
+    const refreshBtn = document.getElementById('refresh-btn');
+
+    loader.style.display = 'flex';
+    content.style.display = 'none';
+    errorBox.style.display = 'none';
+    refreshBtn.disabled = true;
+    document.getElementById('slack-btn').disabled = true;
+
+    try {
+      const res = await fetch('/api/pipeline');
+      const data = await res.json();
+
+      if (!res.ok || data.error) throw new Error(data.error || 'Failed to load data');
+
+      pipelineData = data;
+      renderData(data);
+
+      document.getElementById('last-updated').textContent =
+        'Updated ' + new Date(data.fetchedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+      loader.style.display = 'none';
+      content.style.display = 'block';
+      document.getElementById('slack-btn').disabled = false;
+
+    } catch (err) {
+      loader.style.display = 'none';
+      errorBox.style.display = 'block';
+      errorBox.textContent = '⚠ ' + err.message;
+    }
+
+    refreshBtn.disabled = false;
+  }
+
+  function renderData(data) {
+    document.getElementById('stat-total').textContent = data.totalActive;
+    document.getElementById('stat-waiting').textContent = data.waitingOnFeedback.length;
+    document.getElementById('stat-decision').textContent = data.needsDecision.length;
+    document.getElementById('badge-waiting').textContent = data.waitingOnFeedback.length;
+    document.getElementById('badge-decision').textContent = data.needsDecision.length;
+
+    renderCards('waiting-cards', data.waitingOnFeedback, 'red');
+    renderCards('decision-cards', data.needsDecision, 'yellow');
+  }
+
+  function renderCards(containerId, items, color) {
+    const container = document.getElementById(containerId);
+    if (!items || items.length === 0) {
+      container.innerHTML = `<div class="empty"><div class="empty-icon">${color === 'red' ? '✓' : '🎯'}</div>No candidates here right now</div>`;
+      return;
+    }
+
+    container.innerHTML = items.map(app => {
+      const days = app.daysInStage;
+      let daysBadgeClass = 'ok';
+      let daysText = days != null ? `${days}d` : '—';
+      if (days >= 5) daysBadgeClass = 'urgent';
+      else if (days >= 3) daysBadgeClass = 'warn';
+
+      const ashbyLink = app.ashbyUrl
+        ? `<a class="card-link" href="${app.ashbyUrl}" target="_blank">View in Ashby ↗</a>`
+        : '';
+
+      return `
+        <div class="card ${color}">
+          <div class="card-top">
+            <div class="candidate-name">${esc(app.candidateName)}</div>
+            <span class="days-badge ${daysBadgeClass}">${daysText} in stage</span>
+          </div>
+          <div class="card-meta">
+            <span class="meta-pill">📋 ${esc(app.jobTitle)}</span>
+            <span class="meta-pill">🎯 ${esc(app.stage)}</span>
+            <span class="meta-pill">👤 ${esc(app.recruiter)}</span>
+          </div>
+          ${ashbyLink}
+        </div>`;
+    }).join('');
+  }
+
+  function esc(str) {
+    if (!str) return '—';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function buildSlackMessage(data) {
+    const date = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+    let msg = `*📊 Pipeline Health Digest — ${date}*\n`;
+    msg += `_${data.totalActive} active candidates · ${data.waitingOnFeedback.length} waiting on feedback · ${data.needsDecision.length} needs decision_\n\n`;
+
+    if (data.waitingOnFeedback.length > 0) {
+      msg += `🔴 *Waiting on Feedback (${data.waitingOnFeedback.length})*\n`;
+      data.waitingOnFeedback.forEach(a => {
+        const days = a.daysInStage != null ? ` · ${a.daysInStage}d` : '';
+        msg += `• *${a.candidateName}* — ${a.jobTitle} | ${a.stage}${days}\n`;
+      });
+      msg += '\n';
+    }
+
+    if (data.needsDecision.length > 0) {
+      msg += `🟡 *Needs Decision (${data.needsDecision.length})*\n`;
+      data.needsDecision.forEach(a => {
+        msg += `• *${a.candidateName}* — ${a.jobTitle} | ${a.stage} · @${a.recruiter}\n`;
+      });
+      msg += '\n';
+    }
+
+    msg += `_Powered by Pipeline Health Tracker 🤖_`;
+    return msg;
+  }
+
+  function openSlackModal() {
+    if (!pipelineData) return;
+    document.getElementById('slack-preview').textContent = buildSlackMessage(pipelineData);
+    const saved = localStorage.getItem('slack-webhook');
+    if (saved) document.getElementById('webhook-input').value = saved;
+    document.getElementById('slack-modal').classList.add('open');
+  }
+
+  function closeSlackModal() {
+    document.getElementById('slack-modal').classList.remove('open');
+  }
+
+  async function sendToSlack() {
+    const webhook = document.getElementById('webhook-input').value.trim();
+    if (!webhook || !webhook.startsWith('https://hooks.slack.com')) {
+      showToast('⚠', 'Please enter a valid Slack webhook URL');
+      return;
+    }
+    localStorage.setItem('slack-webhook', webhook);
+    const msg = buildSlackMessage(pipelineData);
+    try {
+      await fetch('/api/slack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhook, text: msg })
+      });
+      closeSlackModal();
+      showToast('✓', 'Message sent to Slack!');
+    } catch (err) {
+      showToast('⚠', 'Failed to send: ' + err.message);
+    }
+  }
+
+  function showToast(icon, msg) {
+    const t = document.getElementById('toast');
+    document.getElementById('toast-icon').textContent = icon;
+    document.getElementById('toast-msg').textContent = msg;
+    t.style.display = 'flex';
+    setTimeout(() => { t.style.display = 'none'; }, 3500);
+  }
+
+  // Close modal on backdrop click
+  document.getElementById('slack-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeSlackModal();
+  });
+
+  // Load on start
+  loadData();
+</script>
+</body>
+</html>
