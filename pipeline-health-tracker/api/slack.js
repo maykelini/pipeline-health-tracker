@@ -1,5 +1,4 @@
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end();
+module.exports = async function  if (req.method !== 'POST') return res.status(405).end();
   const { webhook, text } = req.body;
   if (!webhook || !text) return res.status(400).json({ error: 'Missing webhook or text' });
 
