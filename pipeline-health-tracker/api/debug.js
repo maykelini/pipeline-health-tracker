@@ -2,13 +2,7 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   const apiKey = process.env.ASHBY_API_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_KEY;
-
   if (!apiKey) return res.status(500).json({ error: 'ASHBY_API_KEY not configured' });
-
-  const { createClient } = require('@supabase/supabase-js');
-  const supabase = createClient(supabaseUrl, supabaseKey);
 
   const credentials = Buffer.from(`${apiKey}:`).toString('base64');
   const headers = { 'Authorization': `Basic ${credentials}`, 'Content-Type': 'application/json' };
@@ -21,58 +15,20 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const cutoff = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
-    let cursor = null;
-    let hasMore = true;
-    let pages = 0;
-    let targetSyncToken = null;
-    let lastSyncToken = null;
-
-    while (hasMore && pages < 200) {
-      const body = { limit: 100 };
-      if (cursor) body.cursor = cursor;
-      const data = await ashbyPost('interviewSchedule.list', body);
-      if (!data.success) break;
-
-      const results = data.results || [];
-      lastSyncToken = data.syncToken;
-
-      // Check if any result in this page is within our cutoff
-      const hasRecent = results.some(s => new Date(s.createdAt) >= cutoff);
-      if (hasRecent && !targetSyncToken) {
-        targetSyncToken = lastSyncToken;
-      }
-
-      hasMore = data.moreDataAvailable;
-      cursor = data.nextCursor;
-      pages++;
-
-      // Stop once we've gone well past cutoff
-      const newest = results[results.length - 1];
-      if (newest && new Date(newest.createdAt) > new Date()) break;
-    }
-
-    const tokenToSave = targetSyncToken || lastSyncToken;
-
-    // Save to Supabase
-    const { data: existing } = await supabase
-      .from('pipeline_sync')
-      .select('id')
-      .limit(1)
-      .single();
-
-    if (existing?.id) {
-      await supabase.from('pipeline_sync').update({ sync_token: tokenToSave }).eq('id', existing.id);
-    } else {
-      await supabase.from('pipeline_sync').insert({ sync_token: tokenToSave });
-    }
-
-    res.status(200).json({ 
-      ok: true, 
-      pages,
-      tokenSaved: tokenToSave
+    // Test if application.list supports updatedAfter filter
+    const test1 = await ashbyPost('application.list', { 
+      limit: 5, 
+      status: 'Active',
+      updatedAfter: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString()
     });
 
+    // Also check what fields application.list supports
+    const test2 = await ashbyPost('application.list', { limit: 1, status: 'Active' });
+    
+    res.status(200).json({ 
+      withUpdatedAfter: { success: test1.success, count: test1.results?.length, error: test1.errors },
+      sampleKeys: test2.results?.[0] ? Object.keys(test2.results[0]) : []
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
