@@ -28,4 +28,12 @@ module.exports = async function handler(req, res) {
         status: s.status,
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
-        syncToken: data
+        syncToken: data.syncToken
+      }));
+    }
+
+    res.status(200).json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
