@@ -1,17 +1,10 @@
-const { createClient } = require('@supabase/supabase-js');
-
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const apiKey = process.env.ASHBY_API_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_KEY;
-
   if (!apiKey) return res.status(500).json({ error: 'ASHBY_API_KEY not configured' });
-
-  const supabase = createClient(supabaseUrl, supabaseKey);
 
   const credentials = Buffer.from(`${apiKey}:`).toString('base64');
   const headers = { 'Authorization': `Basic ${credentials}`, 'Content-Type': 'application/json' };
@@ -24,52 +17,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // Get saved syncToken from Supabase
-    const { data: syncData } = await supabase
-      .from('pipeline_sync')
-      .select('id, sync_token')
-      .limit(1)
-      .single();
-
-    let syncToken = syncData?.sync_token || null;
-    let schedules = [];
-    let hasMore = true;
-    let pages = 0;
-
-    while (hasMore && pages < 10) {
-      const body = { limit: 100 };
-      if (syncToken) body.syncToken = syncToken;
-      const data = await ashbyPost('interviewSchedule.list', body);
-      if (!data.success) break;
-      schedules = schedules.concat(data.results || []);
-      hasMore = data.moreDataAvailable;
-      if (data.syncToken) syncToken = data.syncToken;
-      pages++;
-      if (!data.moreDataAvailable) break;
-    }
-
-    // Save updated syncToken to Supabase
-    if (syncToken) {
-      if (syncData?.id) {
-        await supabase.from('pipeline_sync').update({ sync_token: syncToken }).eq('id', syncData.id);
-      } else {
-        await supabase.from('pipeline_sync').insert({ sync_token: syncToken });
-      }
-    }
-
-    const waitingIds = {};
-    const decisionIds = {};
-
-    for (const s of schedules) {
-      if (!s.applicationId) continue;
-      if (s.status === 'WaitingOnFeedback') {
-        waitingIds[s.applicationId] = true;
-        delete decisionIds[s.applicationId];
-      } else if (s.status === 'Complete' && !waitingIds[s.applicationId]) {
-        decisionIds[s.applicationId] = true;
-      }
-    }
-
+    // 1. Fetch all active applications
     let applications = [];
     let appCursor = null;
     let appHasMore = true;
@@ -84,12 +32,42 @@ module.exports = async function handler(req, res) {
       appCursor = data.nextCursor;
     }
 
-    const appMap = {};
-    for (const app of applications) appMap[app.id] = app;
+    // 2. Get recent schedules (last 2 pages only, sorted by updatedAt)
+    let schedules = [];
+    let cursor = null;
+    let hasMore = true;
+    let pages = 0;
 
-    function formatApp(appId) {
-      const app = appMap[appId];
-      if (!app) return null;
+    while (hasMore && pages < 3) {
+      const body = { limit: 100 };
+      if (cursor) body.cursor = cursor;
+      const data = await ashbyPost('interviewSchedule.list', body);
+      if (!data.success) break;
+      schedules = schedules.concat(data.results || []);
+      hasMore = data.moreDataAvailable;
+      cursor = data.nextCursor;
+      pages++;
+    }
+
+    // 3. Build a map of applicationId -> schedule status
+    const scheduleMap = {};
+    for (const s of schedules) {
+      if (!s.applicationId) continue;
+      const existing = scheduleMap[s.applicationId];
+      // Keep most recently updated schedule per application
+      if (!existing || new Date(s.updatedAt) > new Date(existing.updatedAt)) {
+        scheduleMap[s.applicationId] = s;
+      }
+    }
+
+    // 4. Filter applications
+    const waitingOnFeedback = [];
+    const needsDecision = [];
+
+    for (const app of applications) {
+      const schedule = scheduleMap[app.id];
+      if (!schedule) continue;
+
       const recruiter = (app.hiringTeam || []).find(
         m => m.role === 'Recruiter' || m.role === 'HiringManager' || m.role === 'Coordinator'
       );
@@ -99,8 +77,9 @@ module.exports = async function handler(req, res) {
       const daysInStage = stageEntered
         ? Math.floor((Date.now() - new Date(stageEntered)) / 86400000) : null;
       const candidateId = app.candidate?.id || '';
-      return {
-        id: appId,
+
+      const formatted = {
+        id: app.id,
         candidateName: app.candidate?.name || '—',
         jobTitle: app.job?.title || '—',
         stage: app.currentInterviewStage?.title || '—',
@@ -108,11 +87,17 @@ module.exports = async function handler(req, res) {
         daysInStage,
         ashbyUrl: candidateId ? `https://app.ashbyhq.com/candidates/${candidateId}` : null
       };
+
+      if (schedule.status === 'WaitingOnFeedback') {
+        waitingOnFeedback.push(formatted);
+      } else if (schedule.status === 'Complete') {
+        needsDecision.push(formatted);
+      }
     }
 
     res.status(200).json({
-      waitingOnFeedback: Object.keys(waitingIds).map(formatApp).filter(Boolean),
-      needsDecision: Object.keys(decisionIds).map(formatApp).filter(Boolean),
+      waitingOnFeedback,
+      needsDecision,
       totalActive: applications.length,
       fetchedAt: new Date().toISOString()
     });
