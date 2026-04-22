@@ -15,17 +15,17 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // Try different sort options
-    const asc = await ashbyPost('interviewSchedule.list', { limit: 3, syncToken: 'WP9xnLJZJ' });
-    const desc = await ashbyPost('interviewSchedule.list', { limit: 3, orderBy: 'createdAt_DESC' });
-    const desc2 = await ashbyPost('interviewSchedule.list', { limit: 3, sort: 'desc' });
-    
-    res.status(200).json({ 
-      withSyncToken: asc.results?.map(s => ({ status: s.status, createdAt: s.createdAt })),
-      withOrderBy: desc.results?.map(s => ({ status: s.status, createdAt: s.createdAt })),
-      withSort: desc2.results?.map(s => ({ status: s.status, createdAt: s.createdAt }))
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
+    const ids = [
+      '4c1bb35f-2951-4abe-b3aa-f6acf9d3d28d', // Gabriel - Waiting on Feedback
+      'bdd62a2a-9d69-4639-ae28-7fe17fce4238',  // New candidate - Needs Decision
+      '4975a629-6439-4e6b-af5b-fdd25695ceeb'   // Joseph - Needs Decision
+    ];
+
+    const results = {};
+    for (const id of ids) {
+      const data = await ashbyPost('interviewSchedule.list', { applicationId: id });
+      results[id] = (data.results || []).map(s => ({
+        status: s.status,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+        syncToken: data
