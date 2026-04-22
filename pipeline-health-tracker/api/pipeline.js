@@ -17,13 +17,15 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    const cutoff = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
+
     let schedules = [];
     let cursor = null;
     let hasMore = true;
     let pages = 0;
 
-    while (hasMore && pages < 3) {
-      const body = { limit: 100 };
+    while (hasMore && pages < 5) {
+      const body = { limit: 100, createdAfter: cutoff };
       if (cursor) body.cursor = cursor;
       const data = await ashbyPost('interviewSchedule.list', body);
       if (!data.success) break;
