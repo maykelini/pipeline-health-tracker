@@ -22,7 +22,7 @@ module.exports = async function handler(req, res) {
     let hasMore = true;
     let pages = 0;
 
-    while (hasMore && pages < 20) {
+    while (hasMore && pages < 3) {
       const body = { limit: 100 };
       if (cursor) body.cursor = cursor;
       const data = await ashbyPost('interviewSchedule.list', body);
