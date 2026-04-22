@@ -17,10 +17,6 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const now = new Date();
-    const cutoff = new Date(now - 30 * 24 * 60 * 60 * 1000);
-
-    // Fetch schedules — up to 20 pages
     let schedules = [];
     let cursor = null;
     let hasMore = true;
@@ -37,35 +33,19 @@ module.exports = async function handler(req, res) {
       pages++;
     }
 
-    const waitingOnFeedback = {};
-    const needsDecision = {};
+    const waitingIds = {};
+    const decisionIds = {};
 
-    for (const schedule of schedules) {
-      const events = schedule.interviewEvents || [];
-      if (events.length === 0) continue;
-
-      const pastEvents = events.filter(e => {
-        const end = new Date(e.endTime || e.startTime || 0);
-        return end < now && end > cutoff;
-      });
-
-      if (pastEvents.length === 0) continue;
-
-      const appId = schedule.applicationId;
-      if (!appId) continue;
-
-      const anyMissing = pastEvents.some(e => e.hasSubmittedFeedback === false);
-      const allSubmitted = pastEvents.every(e => e.hasSubmittedFeedback === true);
-
-      if (anyMissing) {
-        waitingOnFeedback[appId] = true;
-        delete needsDecision[appId];
-      } else if (allSubmitted && !waitingOnFeedback[appId]) {
-        needsDecision[appId] = true;
+    for (const s of schedules) {
+      if (!s.applicationId) continue;
+      if (s.status === 'WaitingOnFeedback') {
+        waitingIds[s.applicationId] = true;
+        delete decisionIds[s.applicationId];
+      } else if (s.status === 'Complete' && !waitingIds[s.applicationId]) {
+        decisionIds[s.applicationId] = true;
       }
     }
 
-    // Fetch active applications
     let applications = [];
     let appCursor = null;
     let appHasMore = true;
@@ -107,8 +87,8 @@ module.exports = async function handler(req, res) {
     }
 
     res.status(200).json({
-      waitingOnFeedback: Object.keys(waitingOnFeedback).map(formatApp).filter(Boolean),
-      needsDecision: Object.keys(needsDecision).map(formatApp).filter(Boolean),
+      waitingOnFeedback: Object.keys(waitingIds).map(formatApp).filter(Boolean),
+      needsDecision: Object.keys(decisionIds).map(formatApp).filter(Boolean),
       totalActive: applications.length,
       fetchedAt: new Date().toISOString()
     });
