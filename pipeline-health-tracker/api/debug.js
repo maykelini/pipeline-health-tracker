@@ -15,15 +15,16 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const data = await ashbyPost('interviewSchedule.list', { limit: 10 });
-    const summary = (data.results || []).map(s => ({
-      id: s.id,
-      status: s.status,
-      applicationId: s.applicationId,
-      createdAt: s.createdAt,
-      updatedAt: s.updatedAt
-    }));
-    res.status(200).json({ summary, total: data.results?.length, moreDataAvailable: data.moreDataAvailable });
+    // Try different sort options
+    const asc = await ashbyPost('interviewSchedule.list', { limit: 3, syncToken: 'WP9xnLJZJ' });
+    const desc = await ashbyPost('interviewSchedule.list', { limit: 3, orderBy: 'createdAt_DESC' });
+    const desc2 = await ashbyPost('interviewSchedule.list', { limit: 3, sort: 'desc' });
+    
+    res.status(200).json({ 
+      withSyncToken: asc.results?.map(s => ({ status: s.status, createdAt: s.createdAt })),
+      withOrderBy: desc.results?.map(s => ({ status: s.status, createdAt: s.createdAt })),
+      withSort: desc2.results?.map(s => ({ status: s.status, createdAt: s.createdAt }))
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
