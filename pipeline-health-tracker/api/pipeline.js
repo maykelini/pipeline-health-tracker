@@ -17,13 +17,15 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // 1. Fetch all active applications
+    const updatedAfter = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString();
+
+    // 1. Fetch active applications updated in last 45 days
     let applications = [];
     let appCursor = null;
     let appHasMore = true;
 
     while (appHasMore) {
-      const body = { limit: 100, status: 'Active' };
+      const body = { limit: 100, status: 'Active', updatedAfter };
       if (appCursor) body.cursor = appCursor;
       const data = await ashbyPost('application.list', body);
       if (!data.success) break;
@@ -32,41 +34,21 @@ module.exports = async function handler(req, res) {
       appCursor = data.nextCursor;
     }
 
-    // 2. Get recent schedules (last 2 pages only, sorted by updatedAt)
-    let schedules = [];
-    let cursor = null;
-    let hasMore = true;
-    let pages = 0;
-
-    while (hasMore && pages < 3) {
-      const body = { limit: 100 };
-      if (cursor) body.cursor = cursor;
-      const data = await ashbyPost('interviewSchedule.list', body);
-      if (!data.success) break;
-      schedules = schedules.concat(data.results || []);
-      hasMore = data.moreDataAvailable;
-      cursor = data.nextCursor;
-      pages++;
-    }
-
-    // 3. Build a map of applicationId -> schedule status
-    const scheduleMap = {};
-    for (const s of schedules) {
-      if (!s.applicationId) continue;
-      const existing = scheduleMap[s.applicationId];
-      // Keep most recently updated schedule per application
-      if (!existing || new Date(s.updatedAt) > new Date(existing.updatedAt)) {
-        scheduleMap[s.applicationId] = s;
-      }
-    }
-
-    // 4. Filter applications
+    // 2. For each application, fetch its schedule
     const waitingOnFeedback = [];
     const needsDecision = [];
 
     for (const app of applications) {
-      const schedule = scheduleMap[app.id];
-      if (!schedule) continue;
+      const schedData = await ashbyPost('interviewSchedule.list', { applicationId: app.id });
+      const schedules = schedData.results || [];
+      if (schedules.length === 0) continue;
+
+      // Get most recently updated schedule
+      const latest = schedules.sort((a, b) => 
+        new Date(b.updatedAt) - new Date(a.updatedAt)
+      )[0];
+
+      if (latest.status !== 'WaitingOnFeedback' && latest.status !== 'Complete') continue;
 
       const recruiter = (app.hiringTeam || []).find(
         m => m.role === 'Recruiter' || m.role === 'HiringManager' || m.role === 'Coordinator'
@@ -88,17 +70,20 @@ module.exports = async function handler(req, res) {
         ashbyUrl: candidateId ? `https://app.ashbyhq.com/candidates/${candidateId}` : null
       };
 
-      if (schedule.status === 'WaitingOnFeedback') {
+      if (latest.status === 'WaitingOnFeedback') {
         waitingOnFeedback.push(formatted);
-      } else if (schedule.status === 'Complete') {
+      } else {
         needsDecision.push(formatted);
       }
     }
 
+    // 3. Get total active count
+    const totalData = await ashbyPost('application.list', { limit: 1, status: 'Active' });
+
     res.status(200).json({
       waitingOnFeedback,
       needsDecision,
-      totalActive: applications.length,
+      totalActive: totalData.totalCount || applications.length,
       fetchedAt: new Date().toISOString()
     });
 
