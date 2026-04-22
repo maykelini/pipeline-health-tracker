@@ -15,12 +15,15 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const appId = '4975a629-6439-4e6b-af5b-fdd25695ceeb';
-
-    const schedules = await ashbyPost('interviewSchedule.list', { applicationId: appId });
-    const feedback = await ashbyPost('applicationFeedback.list', { applicationId: appId });
-
-    res.status(200).json({ schedules, feedback });
+    const data = await ashbyPost('interviewSchedule.list', { limit: 10 });
+    const summary = (data.results || []).map(s => ({
+      id: s.id,
+      status: s.status,
+      applicationId: s.applicationId,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt
+    }));
+    res.status(200).json({ summary, total: data.results?.length, moreDataAvailable: data.moreDataAvailable });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
